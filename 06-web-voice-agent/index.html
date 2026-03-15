@@ -1,0 +1,577 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>Voice Agent Demo</title>
+
+  <!--
+    Load the Bland Web Client SDK from unpkg CDN.
+    This provides the BlandWebClient class that handles WebSocket-based
+    voice streaming between the browser microphone and the Bland AI agent.
+  -->
+  <script src="https://unpkg.com/bland-voice"></script>
+
+  <style>
+    /* ---------------------------------------------------------------
+       Reset
+       Remove default browser margins and set border-box sizing so
+       padding does not increase element dimensions.
+    --------------------------------------------------------------- */
+    *, *::before, *::after {
+      box-sizing: border-box;
+      margin: 0;
+      padding: 0;
+    }
+
+    /* ---------------------------------------------------------------
+       Body
+       Full-viewport dark gradient background with centered content.
+       The gradient transitions from a deep navy to a slightly
+       lighter slate, creating depth without distraction.
+    --------------------------------------------------------------- */
+    body {
+      font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto,
+        "Helvetica Neue", Arial, sans-serif;
+      min-height: 100vh;
+      display: flex;
+      align-items: center;
+      justify-content: center;
+      background: linear-gradient(135deg, #0b1120 0%, #1a2744 50%, #0f1b30 100%);
+      color: #f1f5f9;
+    }
+
+    /* ---------------------------------------------------------------
+       Container
+       Constrains the card to a comfortable reading width and adds
+       horizontal padding for mobile screens.
+    --------------------------------------------------------------- */
+    .container {
+      width: 100%;
+      max-width: 440px;
+      padding: 24px;
+    }
+
+    /* ---------------------------------------------------------------
+       Card
+       The main UI surface. Uses a semi-transparent background with
+       a subtle border to create a frosted glass effect against the
+       gradient background.
+    --------------------------------------------------------------- */
+    .card {
+      background: rgba(30, 41, 59, 0.85);
+      border: 1px solid rgba(148, 163, 184, 0.15);
+      border-radius: 16px;
+      padding: 48px 36px 40px;
+      text-align: center;
+      backdrop-filter: blur(12px);
+    }
+
+    /* ---------------------------------------------------------------
+       Title and Subtitle
+    --------------------------------------------------------------- */
+    .title {
+      font-size: 22px;
+      font-weight: 700;
+      margin-bottom: 4px;
+      letter-spacing: -0.3px;
+    }
+
+    .subtitle {
+      font-size: 14px;
+      color: #94a3b8;
+      margin-bottom: 28px;
+    }
+
+    /* ---------------------------------------------------------------
+       Microphone Icon Container
+       Holds the SVG microphone icon. The icon sits inside a circular
+       background that pulses when the conversation is active.
+    --------------------------------------------------------------- */
+    .mic-wrapper {
+      display: flex;
+      align-items: center;
+      justify-content: center;
+      margin-bottom: 28px;
+    }
+
+    .mic-circle {
+      width: 96px;
+      height: 96px;
+      border-radius: 50%;
+      background: rgba(59, 130, 246, 0.1);
+      border: 2px solid rgba(59, 130, 246, 0.25);
+      display: flex;
+      align-items: center;
+      justify-content: center;
+      transition: background 0.3s ease, border-color 0.3s ease, box-shadow 0.3s ease;
+    }
+
+    /* When the conversation is active, the circle gets a blue glow
+       and the pulsing animation draws the user's attention. */
+    .mic-circle.active {
+      background: rgba(59, 130, 246, 0.2);
+      border-color: rgba(59, 130, 246, 0.6);
+      box-shadow: 0 0 30px rgba(59, 130, 246, 0.3);
+      animation: pulse-glow 2s ease-in-out infinite;
+    }
+
+    .mic-circle svg {
+      width: 36px;
+      height: 36px;
+      color: #94a3b8;
+      transition: color 0.3s ease;
+    }
+
+    /* The icon turns bright blue when the conversation is active. */
+    .mic-circle.active svg {
+      color: #3b82f6;
+    }
+
+    /* Pulsing glow animation applied to the mic circle during
+       an active conversation. The box-shadow expands and contracts
+       to simulate a breathing or speaking rhythm. */
+    @keyframes pulse-glow {
+      0%, 100% {
+        box-shadow: 0 0 20px rgba(59, 130, 246, 0.2);
+      }
+      50% {
+        box-shadow: 0 0 40px rgba(59, 130, 246, 0.45);
+      }
+    }
+
+    /* ---------------------------------------------------------------
+       Status Indicator
+       A small colored dot and text label that reflects the current
+       state of the voice connection.
+    --------------------------------------------------------------- */
+    .status {
+      display: flex;
+      align-items: center;
+      justify-content: center;
+      gap: 8px;
+      margin-bottom: 32px;
+      font-size: 14px;
+      color: #94a3b8;
+    }
+
+    .status-dot {
+      width: 8px;
+      height: 8px;
+      border-radius: 50%;
+      background-color: #64748b;
+      transition: background-color 0.3s ease;
+    }
+
+    /* Ready state: neutral gray dot (default). */
+
+    /* Connecting state: yellow dot with a pulsing animation
+       to indicate the connection is being established. */
+    .status-dot.connecting {
+      background-color: #eab308;
+      animation: dot-pulse 1s ease-in-out infinite;
+    }
+
+    /* Active state: green dot with a subtle glow to indicate
+       the voice connection is live. */
+    .status-dot.active {
+      background-color: #22c55e;
+      box-shadow: 0 0 6px rgba(34, 197, 94, 0.5);
+    }
+
+    /* Ended state: dim gray dot after the conversation ends. */
+    .status-dot.ended {
+      background-color: #475569;
+    }
+
+    /* Simple opacity pulse for the connecting state dot. */
+    @keyframes dot-pulse {
+      0%, 100% { opacity: 1; }
+      50% { opacity: 0.3; }
+    }
+
+    /* ---------------------------------------------------------------
+       Buttons
+       Two action buttons that swap visibility depending on the
+       current state. Only one is visible at any given time.
+    --------------------------------------------------------------- */
+    .btn {
+      display: inline-flex;
+      align-items: center;
+      justify-content: center;
+      gap: 8px;
+      width: 100%;
+      max-width: 260px;
+      padding: 14px 24px;
+      border: none;
+      border-radius: 12px;
+      font-size: 15px;
+      font-weight: 600;
+      cursor: pointer;
+      transition: background-color 0.2s ease, transform 0.1s ease;
+    }
+
+    .btn:active {
+      transform: scale(0.97);
+    }
+
+    .btn:disabled {
+      opacity: 0.5;
+      cursor: not-allowed;
+      transform: none;
+    }
+
+    /* Start button: blue, indicates a positive/primary action. */
+    .btn-start {
+      background-color: #3b82f6;
+      color: #ffffff;
+    }
+
+    .btn-start:hover:not(:disabled) {
+      background-color: #2563eb;
+    }
+
+    /* End button: red, indicates a destructive/stopping action. */
+    .btn-end {
+      background-color: #ef4444;
+      color: #ffffff;
+    }
+
+    .btn-end:hover:not(:disabled) {
+      background-color: #dc2626;
+    }
+
+    /* ---------------------------------------------------------------
+       Utility: hide elements by toggling this class.
+    --------------------------------------------------------------- */
+    .hidden {
+      display: none !important;
+    }
+
+    /* ---------------------------------------------------------------
+       Error Message
+       Displayed below the buttons when something goes wrong,
+       such as a missing microphone or a network failure.
+    --------------------------------------------------------------- */
+    .error-msg {
+      margin-top: 16px;
+      font-size: 13px;
+      color: #f87171;
+      line-height: 1.5;
+    }
+
+    /* ---------------------------------------------------------------
+       Footer
+       Attribution link at the bottom of the page.
+    --------------------------------------------------------------- */
+    .footer {
+      text-align: center;
+      margin-top: 20px;
+      font-size: 12px;
+      color: #64748b;
+    }
+
+    .footer a {
+      color: #3b82f6;
+      text-decoration: none;
+    }
+
+    .footer a:hover {
+      text-decoration: underline;
+    }
+  </style>
+</head>
+<body>
+  <div class="container">
+    <div class="card">
+      <!-- Header -->
+      <div class="title">Voice Agent</div>
+      <div class="subtitle">Speak with our AI assistant</div>
+
+      <!--
+        Microphone Icon
+        The outer circle pulses when a conversation is active.
+        The SVG inside is a standard microphone glyph.
+      -->
+      <div class="mic-wrapper">
+        <div class="mic-circle" id="micCircle">
+          <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24" fill="none"
+               stroke="currentColor" stroke-width="2" stroke-linecap="round"
+               stroke-linejoin="round">
+            <!-- Microphone body -->
+            <path d="M12 2a3 3 0 0 0-3 3v7a3 3 0 0 0 6 0V5a3 3 0 0 0-3-3Z"></path>
+            <!-- Pickup arc around the mic -->
+            <path d="M19 10v2a7 7 0 0 1-14 0v-2"></path>
+            <!-- Stand/base line -->
+            <line x1="12" x2="12" y1="19" y2="22"></line>
+          </svg>
+        </div>
+      </div>
+
+      <!--
+        Status Indicator
+        The dot and label reflect one of four states:
+        Ready, Connecting, Active, or Ended.
+      -->
+      <div class="status">
+        <div class="status-dot" id="statusDot"></div>
+        <span id="statusText">Ready</span>
+      </div>
+
+      <!--
+        Action Buttons
+        "Start Conversation" is shown when idle or ended.
+        "End Conversation" is shown when active.
+      -->
+      <button class="btn btn-start" id="startBtn" onclick="startConversation()">
+        Start Conversation
+      </button>
+      <button class="btn btn-end hidden" id="endBtn" onclick="endConversation()">
+        End Conversation
+      </button>
+
+      <!-- Error message area (hidden by default) -->
+      <div class="error-msg hidden" id="errorMsg"></div>
+    </div>
+
+    <div class="footer">
+      Powered by <a href="https://www.bland.ai" target="_blank" rel="noopener">Bland AI</a>
+    </div>
+  </div>
+
+  <script>
+    // =====================================================================
+    // Configuration
+    // =====================================================================
+
+    // Replace this with your actual Bland AI agent ID.
+    // You can find it in the Bland dashboard under your agent's settings.
+    const AGENT_ID = "YOUR_AGENT_ID";
+
+    // The URL of your backend server that returns a session token.
+    // The backend should call the Bland API with your secret API key
+    // and return a short-lived token so the API key never reaches the browser.
+    const BACKEND_URL = "http://localhost:3000";
+
+    // =====================================================================
+    // State
+    // =====================================================================
+
+    // Holds the active BlandWebClient instance. Null when no conversation
+    // is in progress.
+    let client = null;
+
+    // =====================================================================
+    // DOM References
+    // Cache element references once to avoid repeated DOM lookups.
+    // =====================================================================
+    const startBtn = document.getElementById("startBtn");
+    const endBtn = document.getElementById("endBtn");
+    const statusDot = document.getElementById("statusDot");
+    const statusText = document.getElementById("statusText");
+    const micCircle = document.getElementById("micCircle");
+    const errorMsg = document.getElementById("errorMsg");
+
+    // =====================================================================
+    // startConversation()
+    //
+    // Triggered when the user clicks "Start Conversation". This function:
+    //   1. Fetches a single-use session token from your backend /authorize
+    //      endpoint. The backend holds the Bland API key and creates the
+    //      token server-side so the secret never reaches the browser.
+    //   2. Creates a BlandWebClient instance with the agent ID and token.
+    //   3. Calls initConversation() which requests microphone permission,
+    //      opens a WebSocket to Bland's voice servers, and begins two-way
+    //      audio streaming.
+    //   4. Updates the UI to the "Active" state.
+    // =====================================================================
+    async function startConversation() {
+      try {
+        // Clear any previous error messages.
+        hideError();
+
+        // Disable the start button and show "Connecting" status to
+        // prevent duplicate clicks while the session is being set up.
+        startBtn.disabled = true;
+        setStatus("connecting");
+
+        // Step 1: Request a session token from the backend.
+        // The backend should respond with { token: "...", agentId: "..." }.
+        const res = await fetch(`${BACKEND_URL}/authorize`, {
+          method: "POST",
+          headers: { "Content-Type": "application/json" },
+          // You can pass user-specific metadata here. The backend can
+          // forward it to Bland as request_data for prompt variables.
+          body: JSON.stringify({}),
+        });
+
+        // If the server returned an error status, throw so we land
+        // in the catch block and show the user a helpful message.
+        if (!res.ok) {
+          const errBody = await res.json().catch(() => ({}));
+          throw new Error(errBody.error || "Server returned " + res.status);
+        }
+
+        const data = await res.json();
+
+        // Validate that both required values are present.
+        if (!data.token) {
+          throw new Error("No session token returned from server.");
+        }
+
+        // Use the agent ID from the server response if provided,
+        // otherwise fall back to the constant defined above.
+        const agentId = data.agentId || AGENT_ID;
+
+        // Step 2: Create the BlandWebClient.
+        // The constructor takes the agent ID and the session token.
+        client = new BlandWebClient(agentId, data.token);
+
+        // Step 3: Initialize the voice conversation.
+        // This prompts the browser for microphone access, opens a
+        // WebSocket connection to Bland, and starts streaming audio
+        // in both directions.
+        // sampleRate: 44100 Hz is CD quality and works well for voice.
+        await client.initConversation({ sampleRate: 44100 });
+
+        // Step 4: Update the UI to reflect the active conversation.
+        setStatus("active");
+        startBtn.classList.add("hidden");
+        endBtn.classList.remove("hidden");
+        micCircle.classList.add("active");
+
+      } catch (err) {
+        // Something went wrong. Log the full error for debugging and
+        // show a user-friendly message in the UI.
+        console.error("Failed to start conversation:", err);
+        showError(friendlyError(err));
+
+        // Reset the UI so the user can try again.
+        setStatus("ready");
+        startBtn.disabled = false;
+      }
+    }
+
+    // =====================================================================
+    // endConversation()
+    //
+    // Triggered when the user clicks "End Conversation". This function:
+    //   1. Calls stopConversation() on the BlandWebClient to close the
+    //      WebSocket and release the microphone.
+    //   2. Clears the client reference.
+    //   3. Resets the UI to the "Ended" state.
+    // =====================================================================
+    function endConversation() {
+      // Stop the voice session if a client exists.
+      if (client) {
+        try {
+          client.stopConversation();
+        } catch (e) {
+          // The conversation may already be closed on the server side.
+          // Log but do not surface to the user.
+          console.error("Error stopping conversation:", e);
+        }
+        client = null;
+      }
+
+      // Update UI to the ended state.
+      setStatus("ended");
+      endBtn.classList.add("hidden");
+      startBtn.classList.remove("hidden");
+      startBtn.disabled = false;
+      micCircle.classList.remove("active");
+    }
+
+    // =====================================================================
+    // UI Helpers
+    // =====================================================================
+
+    /**
+     * setStatus(state)
+     *
+     * Updates the status dot color and label text to match
+     * one of four states: "ready", "connecting", "active", or "ended".
+     *
+     * @param {string} state - The new status state.
+     */
+    function setStatus(state) {
+      // Remove all state-specific classes from the dot.
+      statusDot.classList.remove("connecting", "active", "ended");
+
+      // Apply the appropriate class and label.
+      switch (state) {
+        case "connecting":
+          statusDot.classList.add("connecting");
+          statusText.textContent = "Connecting...";
+          break;
+        case "active":
+          statusDot.classList.add("active");
+          statusText.textContent = "Active";
+          break;
+        case "ended":
+          statusDot.classList.add("ended");
+          statusText.textContent = "Ended";
+          break;
+        default:
+          // "ready" or any unknown state falls back to neutral.
+          statusText.textContent = "Ready";
+          break;
+      }
+    }
+
+    /**
+     * showError(message)
+     *
+     * Displays an error message below the action buttons.
+     *
+     * @param {string} message - The message to display.
+     */
+    function showError(message) {
+      errorMsg.textContent = message;
+      errorMsg.classList.remove("hidden");
+    }
+
+    /**
+     * hideError()
+     *
+     * Hides the error message area and clears its content.
+     */
+    function hideError() {
+      errorMsg.textContent = "";
+      errorMsg.classList.add("hidden");
+    }
+
+    /**
+     * friendlyError(err)
+     *
+     * Converts a raw Error object into a short, user-friendly string.
+     * Maps common failure modes (microphone denied, network down, etc.)
+     * to actionable instructions.
+     *
+     * @param {Error} err - The caught error.
+     * @returns {string} A human-readable error message.
+     */
+    function friendlyError(err) {
+      const msg = err.message || "";
+
+      // The user denied microphone access in the browser permission prompt.
+      if (msg.includes("NotAllowedError") || msg.includes("Permission denied")) {
+        return "Microphone access was denied. Please allow it in your browser settings and try again.";
+      }
+
+      // No microphone hardware was detected.
+      if (msg.includes("NotFoundError") || msg.includes("no audio")) {
+        return "No microphone detected. Please connect one and try again.";
+      }
+
+      // The backend server is not reachable (wrong URL, server down, CORS).
+      if (msg.includes("Failed to fetch") || msg.includes("NetworkError")) {
+        return "Cannot reach the server. Make sure the backend is running and try again.";
+      }
+
+      // Fallback: show the raw error message.
+      return "Something went wrong: " + msg;
+    }
+  </script>
+</body>
+</html>
